@@ -1,0 +1,1 @@
+# All required libraries are included in the ESP32 Arduino core.

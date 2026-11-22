@@ -1,0 +1,8 @@
+[wokwi]
+version = 1
+firmware = ".pio/build/esp32dev/firmware.bin"
+elf = ".pio/build/esp32dev/firmware.elf"
+
+# Wokwi for VS Code bundles the local IoT gateway.
+# ESP32 -> host.wokwi.internal:3002 is outbound; no net.forward is needed.
+# Browser public gateway cannot reach this local endpoint.

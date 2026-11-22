@@ -5,6 +5,8 @@ const eslintConfig = defineConfig([
   ...nextVitals,
   // Override default ignores of eslint-config-next.
   globalIgnores([
+    ".tools/**",
+    "hardware/wokwi-esp32/.pio/**",
     // Default ignores of eslint-config-next:
     ".next/**",
     "out/**",

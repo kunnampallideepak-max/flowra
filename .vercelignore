@@ -1,0 +1,14 @@
+/*
+!/app
+!/lib
+!/public
+!/package.json
+!/package-lock.json
+!/next.config.mjs
+!/jsconfig.json
+.env*
+*.log
+*.pem
+*.bin
+*.elf
+secrets.h

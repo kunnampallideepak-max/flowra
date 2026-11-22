@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "name": "Fictional topology for schema testing",
+  "provenance": {
+    "publisher": "Flowra documentation example, not a utility",
+    "sourceUrl": "https://example.org/flowra-fictional-example",
+    "permission": "public-license",
+    "licenseReference": "Fictional test fixture; not real pipeline data or verified provenance"
+  },
+  "nodes": [
+    { "id": "source", "kind": "source" },
+    { "id": "tank", "kind": "reservoir" },
+    { "id": "valve-a", "kind": "valve" },
+    { "id": "zone-a", "kind": "zone" }
+  ],
+  "edges": [{ "from": "source", "to": "tank" }, { "from": "tank", "to": "valve-a" }, { "from": "valve-a", "to": "zone-a" }],
+  "sensors": [{ "id": "level", "nodeId": "tank", "kind": "level" }]
+}

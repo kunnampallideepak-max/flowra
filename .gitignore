@@ -12,6 +12,8 @@
 
 # testing
 /coverage
+/test-results/
+/playwright-report/
 
 # next.js
 /.next/
@@ -23,8 +25,14 @@
 # misc
 .DS_Store
 *.pem
+hardware/wokwi-esp32/secrets.h
+hardware/wokwi-esp32/.pio/
+hardware/wokwi-esp32/build/
 
 # debug
+*.log
+*.bin
+*.elf
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -32,6 +40,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -39,3 +48,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Local firmware verification toolchain (never publish)
+/.tools/
