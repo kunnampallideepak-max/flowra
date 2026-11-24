@@ -1,8 +1,8 @@
 # Flowra: connected simulated ESP32
 
-The ESP32 firmware generates **synthetic** tank and flow readings and sends authenticated HTTP frames. It does not read physical water sensors. Flowra identifies its source as **Connected simulated ESP32**. No device-command endpoint exists.
+The ESP32 firmware runs in Wokwi and generates **synthetic** tank and flow readings. The private Wokwi gateway delivers authenticated HTTP frames to the Flowra receiver on your computer. Open **http://127.0.0.1:3002** to see them as **Connected simulated ESP32**. The [public Vercel demo](https://flowra-mu.vercel.app/) runs the browser’s internal simulation and has a separate data source.
 
-## Verification status (21 November 2026)
+## Verified demonstrations
 
 | Check | Result |
 | --- | --- |
@@ -12,6 +12,7 @@ The ESP32 firmware generates **synthetic** tank and flow readings and sends auth
 | Wokwi serial command `2` | **Passed.** Sequence 87 had two consecutive Zone B imbalances and zero alerts. By sequence 89, Analysis & alerts displayed **Suspected leak · Zone B** with a 12 L/min imbalance. |
 | Wokwi serial command `s` | **Passed.** The receiver marked sequence 161 stale at about 15 seconds and disconnected at about 45 seconds. Connected device showed both states. Its receipt stayed at 15:53:35.206Z and all 90 retained samples stayed identical. |
 | Wokwi serial commands `1`, then `r` | **Passed.** Sequence 162 arrived at 15:57:33.621Z. Connected device returned to **Receiving readings** and started a fresh history window. Subsequent normal readings had zero Zone B imbalance and the active leak alert cleared. |
+| Wokwi telemetry and Gemini together | The team ran `serve --with-gemini`, confirmed that Gemini 3.5 Flash-Lite reported the frozen ESP32 snapshot’s tank volume, and asked it to explain the observed 12 L/min Zone B imbalance. |
 
 The old source filter excluded PlatformIO's generated sketch.ino.cpp and caused Nothing to build. The filter now includes that compiled source. No private credential is required to compile: without secrets.h the example configuration compiles but deliberately refuses to transmit.
 
@@ -37,7 +38,15 @@ Official references checked for this setup:
 
 ### 1. Install or confirm the tools
 
-You need Node.js/npm, Python 3, VS Code, and the **Wokwi for VS Code** extension. PlatformIO IDE is optional: the commands below use a private workspace Python environment instead.
+You need Git, Node.js 22 with npm, Python 3 with pip, VS Code and the **Wokwi for VS Code** extension with a working local gateway. From a fresh PowerShell terminal, clone the repository and install the JavaScript dependencies:
+
+```powershell
+git clone https://github.com/kunnampallideepak-max/flowra.git
+cd flowra
+npm.cmd ci
+```
+
+Open that `flowra` folder in VS Code. Run the remaining commands from its root.
 
 In VS Code, Ctrl+Shift+X opens Extensions. Install Wokwi for VS Code from its official publisher. Press F1 -> **Wokwi: Request a new License** and follow the official browser sign-in/activation instructions using your own account. This task cannot activate it for you. If access is unavailable or the terms require a plan you do not want, stop the Wokwi steps and use the local Node sender below.
 
@@ -52,11 +61,11 @@ node scripts/wokwi-demo.mjs prepare
 
 Prepare generates a new 32-byte random device-only credential in ignored .tools/wokwi-demo.json and hardware/wokwi-esp32/secrets.h. Nothing is printed. Existing private configuration is never overwritten. If you already have secrets.h, back it up privately yourself before using the disposable workflow. The helper leaves root .env.local and its Gemini key unchanged.
 
-The generated firmware URL is **http://host.wokwi.internal:3002/api/telemetry**, not localhost inside the ESP32. The separate test server binds only to 127.0.0.1:3002 and accepts this disposable credential for esp32-flowra-01. It never uses the public demo password for ingestion. Gemini is disabled only in this test server process, preventing accidental generation charges.
+The generated firmware URL is **http://host.wokwi.internal:3002/api/telemetry**. Both startup modes bind to **127.0.0.1:3002** and validate the same device credential and ID. The Gemini API key belongs only on the Flowra server.
 
 ### 3. Compile the firmware
 
-This workspace now has the following ignored build tools installed. For a fresh checkout, create them once:
+Install PlatformIO in the project’s ignored tools directory once:
 
 ```powershell
 python -m venv .tools/pio-venv
@@ -79,11 +88,21 @@ These are private build artifacts when credentials are compiled in. They are git
 
 ### 4. Start the local Flowra receiver
 
-In a root PowerShell terminal, run and leave it open:
+Choose one startup mode and leave its PowerShell terminal open.
+
+**ESP32 telemetry with rules-based summaries.** This default mode disables Gemini even when you have a configured key.
 
 ```powershell
 node scripts/wokwi-demo.mjs serve
 ```
+
+**ESP32 telemetry with Gemini.** On a fresh clone, run `Copy-Item .env.example .env.local` once. If `.env.local` already exists, use the existing file. In that private file set `GEMINI_API_KEY` to your own key. Use `GEMINI_MODEL=gemini-3.5-flash-lite` and `GEMINI_TIMEOUT_MS=60000` as in the example. The timeout is in milliseconds, accepts integers from 1000 through 120000 and defaults to 60000. An empty model setting selects the application default, `gemini-flash-latest`.
+
+```powershell
+node scripts/wokwi-demo.mjs serve --with-gemini
+```
+
+The opt-in startup message is **Gemini allowed using server configuration**. Generation uses the server’s environment, including `.env.local`. A missing key or provider failure leaves the rules-based summary available. To switch modes, press **Ctrl+C** in the receiver terminal and start it with the other command. Reuse the prepared device credential and compiled firmware. After a receiver restart, wait for a new frame before asking about it.
 
 Open **http://127.0.0.1:3002**, sign in using operator / flowra2026, and go to **Demo & settings -> Connected device**. If a locality-assigned network is active, open **Networks -> Open default three-zone network** first: only that network has a device mapping. No geographic selection should reassign telemetry.
 
@@ -121,6 +140,12 @@ Type a command into Serial Monitor's input and press Enter:
 | r | Resume synthetic transmissions |
 
 Wait for three consecutive accepted leak frames (normally about 15 seconds plus network/simulator latency). Flowra should show a **suspected** Zone B leak using the same detector as internal simulation. Virtual controls remain preview-only in connected mode.
+
+**Verify Gemini on the ESP32 readings** when running with `--with-gemini`:
+
+1. In **Demo & settings**, select **Connected device**. Check that Wokwi reports HTTP 202 and Flowra shows **Receiving readings** with an advancing receipt time.
+2. Open **Ask Flowra**, choose **Use latest snapshot** and look for **Device frame received**. Ask “How much water is in this snapshot, in litres?” Compare the **AI-generated response** with the tank volume in **Snapshot evidence**.
+3. Enter `2` in Wokwi’s Serial Monitor to select the Zone B leak scenario. Once Analysis shows the alert, use the latest snapshot again and ask “How large is the Zone B inlet/outlet imbalance?” Compare the answer with the inlet minus the outlet for that frame. The team observed **12 L/min** in its verified run.
 
 After s or stopping Wokwi, expect **Stale** after 15 seconds and **Disconnected** after 45 seconds from the last fresh frame. Values must stay historical; sequence/history must not advance. These are receiver wall-clock intervals, not an accelerated simulation clock. Press r or restart to resume. Always use the source label to distinguish ESP32 firmware from the Node fallback.
 

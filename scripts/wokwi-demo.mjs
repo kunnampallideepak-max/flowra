@@ -27,9 +27,12 @@ export async function cleanup(root = workspace) {
   if (!header.startsWith(marker) || !header.includes(`"${config.token}"`)) throw new Error('The header is not the generated disposable configuration. Nothing was deleted.');
   await unlink(files.header); await unlink(files.config);
 }
-async function serve() {
+async function serve(withGemini) {
   const config = await readConfig(workspace);
-  const env = { ...process.env, GEMINI_API_KEY: '', FLOWRA_PUBLIC_ORIGIN: '', FLOWRA_INGEST_TOKEN: config.token, FLOWRA_DEVICE_ID: config.deviceId };
+  const env = { ...process.env, FLOWRA_PUBLIC_ORIGIN: '', FLOWRA_INGEST_TOKEN: config.token, FLOWRA_DEVICE_ID: config.deviceId };
+  // Next.js checks the process environment before loading .env.local.
+  if (!withGemini) env.GEMINI_API_KEY = '';
+  else if (!env.GEMINI_API_KEY?.trim()) delete env.GEMINI_API_KEY;
   const windows = process.platform === 'win32';
   const child = windows ? spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'npm.cmd start -- --hostname 127.0.0.1 --port 3002'], { cwd: workspace, env, stdio: 'inherit', windowsHide: true }) : spawn('npm', ['start', '--', '--hostname', '127.0.0.1', '--port', '3002'], { cwd: workspace, env, stdio: 'inherit' });
   let stopping = false;
@@ -42,14 +45,20 @@ async function serve() {
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
   child.on('error', () => { console.error('Could not start the local test server. Build Flowra first.'); process.exitCode = 1; });
   child.on('exit', code => { process.exitCode = stopping ? 0 : code || 0; });
-  console.log('Disposable test server: http://127.0.0.1:3002. Gemini disabled in this process. Ctrl+C stops it. No tunnel or public binding.');
+  const geminiMode = withGemini ? 'Gemini allowed using server configuration.' : 'Gemini disabled in this process.';
+  console.log(`Disposable test server: http://127.0.0.1:3002. ${geminiMode} Ctrl+C stops it. No tunnel or public binding.`);
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const command = process.argv[2];
+  const [command, ...options] = process.argv.slice(2);
+  const withGemini = command === 'serve' && options.length === 1 && options[0] === '--with-gemini';
   try {
-    if (command === 'prepare') { await prepare(); console.log('Prepared private disposable firmware/server configuration. No credential was printed. Build the firmware next.'); }
-    else if (command === 'serve') await serve();
+    if (options.length && !withGemini) {
+      console.error('The only supported option is --with-gemini after serve.');
+      process.exitCode = 1;
+    }
+    else if (command === 'prepare') { await prepare(); console.log('Prepared private disposable firmware/server configuration. No credential was printed. Build the firmware next.'); }
+    else if (command === 'serve') await serve(withGemini);
     else if (command === 'cleanup') { await cleanup(); console.log('Removed generated private configuration. A stopped test server no longer accepts its token. Rebuild before sharing firmware.'); }
-    else console.log('Usage: node scripts/wokwi-demo.mjs prepare | serve | cleanup\nPrepare refuses to overwrite private configuration. Serve requires npm.cmd run build. Stop the server before cleanup; leave .env.local unchanged.');
+    else console.log('Usage: node scripts/wokwi-demo.mjs prepare | serve [--with-gemini] | cleanup\nPrepare refuses to overwrite private configuration. Serve requires npm.cmd run build. Stop the server before cleanup; leave .env.local unchanged.');
   } catch { console.error('Local Wokwi setup could not be completed. Check existing private files, permissions and the documented prepare/serve/cleanup sequence. No credentials are logged.'); process.exitCode = 1; }
 }

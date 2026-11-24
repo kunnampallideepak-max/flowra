@@ -1,13 +1,20 @@
 # Flowra
 
-Water infrastructure monitoring and fair distribution prototype for community operators. It supports an internal simulation and authenticated HTTP readings from a connected simulated ESP32. All demonstration readings are synthetic; virtual valve actions never control hardware.
+Flowra helps community operators explore water storage, flow imbalances and fair distribution using synthetic readings. Sign in with **operator** / **flowra2026** for the public demo.
+
+| Demo | Source of readings | What you can verify |
+| --- | --- | --- |
+| [Public website on Vercel](https://flowra-mu.vercel.app/) | The browser runs Flowra’s internal simulation. | Change a scenario, inspect an alert and ask Gemini 3.5 Flash-Lite about a frozen snapshot. |
+| [Local Wokwi ESP32 demo](hardware/wokwi-esp32/README.md) | Firmware running in Wokwi sends authenticated synthetic frames to Flowra at `127.0.0.1:3002`. Frames stay in that receiver’s memory. | Watch the device sequence advance. With Gemini enabled, ask about the tank volume or the Zone B inlet/outlet imbalance in a received frame. |
 
 ## Run locally
 
-Use Node.js 20.9+ (Node.js 22 LTS recommended) and npm. In Windows PowerShell use `npm.cmd`.
+With Git, Node.js 22 and npm installed, run these commands in Windows PowerShell. On macOS or Linux, use `npm` in place of `npm.cmd`.
 
 ```powershell
-npm.cmd install
+git clone https://github.com/kunnampallideepak-max/flowra.git
+cd flowra
+npm.cmd ci
 npm.cmd run dev
 ```
 
@@ -22,11 +29,15 @@ npm.cmd start
 
 ## Optional Gemini configuration
 
-Copy `.env.example` to `.env.local`, set `GEMINI_API_KEY` locally, and restart Next.js. Never commit the private key or use a `NEXT_PUBLIC_` prefix. `.env.local` is gitignored; `.env.example` is intentionally publishable.
+For a fresh clone, run `Copy-Item .env.example .env.local` in PowerShell. If you already have `.env.local`, edit that file directly. Save your own key there and restart the local server. These settings belong on the server. Keep the key out of Git, firmware and variables prefixed with `NEXT_PUBLIC_`.
 
-`GEMINI_MODEL` defaults to `gemini-flash-latest`; set it to a generateContent-compatible model available to your account. Model availability and quotas can change. On Analysis & alerts, click **Explain this snapshot**. The server validates a bounded numeric snapshot and sends its actual values, alert rules and forecast to Gemini. Responses are labeled with their snapshot minute while the live simulation can continue. Missing configuration, timeout, empty response or upstream errors produce an explicit **AI explanation unavailable** state and a deterministic fallback. The detector never depends on Gemini. No API key is sent to browser code or included in upstream error messages.
+| Variable | Value and behavior |
+| --- | --- |
+| `GEMINI_API_KEY` | Your Gemini API key. Leaving this blank gives you the rules-based snapshot summary. |
+| `GEMINI_MODEL` | Use `gemini-3.5-flash-lite`, the model in the example file and the verified public demo. The application uses `gemini-flash-latest` if this setting is empty or absent. |
+| `GEMINI_TIMEOUT_MS` | Server deadline in milliseconds. The default and example are `60000` (60 seconds). Accepted values are whole numbers from `1000` to `120000`. Invalid values use the default. Hosting limits also apply. |
 
-`GEMINI_TIMEOUT_MS` sets the server request deadline (1,000–120,000 ms; default 60,000). Hosting limits still apply; the route requests a 90-second execution budget where supported. The original 20-second deadline was reproduced during diagnosis, and a 60-second attempt also timed out before HTTP headers arrived. Metadata lookup authenticated successfully for `gemini-flash-latest` and reported `generateContent` support. An empty POST returned the expected validation error promptly. Those alias requests did not verify an answer, so their underlying generation delay remains unresolved; do not interpret a longer timeout as a verified service fix. No retries or model changes happen automatically.
+On **Analysis & alerts**, choose **Explain this snapshot**, or ask a question in **Ask Flowra**. Each request uses one frozen snapshot. If the key is missing, the provider fails or the deadline expires, Flowra labels the rules-based summary and continues monitoring. The route requests a 90-second execution budget where supported and makes one attempt per question.
 
 Errors now include a stable `errorCode` and a specific safe message for missing/invalid keys, denied access, unknown models, quota/billing, rejected requests, provider outages, network/TLS errors, timeouts, blocked content and invalid/empty responses. `/api/explain` returns 504 for a timeout, 429 for upstream quota limits, 503 for missing configuration/service outages, or 502 for other upstream failures, alongside the existing labeled deterministic fallback. Previously all upstream failures appeared as HTTP 200 with one generic message; HTTP 200 now means a parsed Gemini answer succeeded. Invalid app input retains its existing 400/403/413 behavior.
 
@@ -45,6 +56,17 @@ The default diagnostic fetches model metadata without generating tokens. `--chec
 
 The implementation uses the documented [Gemini generateContent REST method](https://ai.google.dev/api/generate-content) with `x-goog-api-key` in a server-only request header. The endpoint rejects cross-origin browser requests, limits input to 40 KB, whitelists numeric simulation fields and bounded conversational text, and enforces a best-effort 10 requests/minute per server instance. This prototype limit is not a distributed abuse-control service; configure host quotas before a large public launch. Gemini usage may have provider quota or billing requirements; it is optional.
 
+## Local ESP32 startup modes
+
+After building Flowra, preparing a device credential and compiling the firmware, run **one** command from the repository root. Both modes accept the same authenticated ESP32 frames at `127.0.0.1:3002`.
+
+| Command | Explanation mode |
+| --- | --- |
+| `node scripts/wokwi-demo.mjs serve` | ESP32 telemetry with rules-based summaries. The launcher disables Gemini even if a key is configured. |
+| `node scripts/wokwi-demo.mjs serve --with-gemini` | ESP32 telemetry with optional Gemini explanations. The server uses its configured key and the model and timeout settings above. |
+
+To switch modes, stop the receiver with **Ctrl+C** and start it with the other command. Reuse the existing device credential and firmware. Follow the [Wokwi setup and verification walkthrough](hardware/wokwi-esp32/README.md) for the first run.
+
 ## Included panels
 
 - **Overview:** shared live tank/flow metrics, real time-series chart, alerts, forecast and zone coverage.
@@ -62,7 +84,7 @@ Ask Flowra captures a numeric snapshot when the first question is sent. Every fo
 
 The server grounds answers in validated zone readings, alert evidence, forecasts and allocation results. It includes up to four prior successful question/answer pairs from the same snapshot, with bounded question/history lengths and snapshot identity checks. User text is treated as untrusted. The model receives no control tools and cannot execute actions. The browser keeps at most 20 turns in memory; reload clears them. Full responses remain visible locally; previous model answers are limited to 1,800 characters each when passed as context.
 
-With no key or an upstream failure, the interface says **AI response unavailable** and labels any deterministic text as a **rules-based snapshot summary, not a generated answer to your question**. A connection failure keeps the typed question for retry. The existing **Explain this snapshot** action remains available. A successful mocked test is not evidence of a real Gemini call; real service responses remain unverified unless explicitly tested with a configured key.
+With no key or an upstream failure, the interface says **AI response unavailable** and labels any deterministic text as a **rules-based snapshot summary, not a generated answer to your question**. A connection failure keeps the typed question for retry. The existing **Explain this snapshot** action remains available.
 
 The sidebar contains only Flowra branding and useful navigation. It scrolls on short desktop displays; mobile navigation exposes text labels in a horizontal scroll region. Promotional content is removed. A functional demo profile and sign-out menu is available in the header; it does not claim a production identity. `devIndicators: false` hides the Next.js development badge without changing other Next configuration.
 
@@ -102,7 +124,7 @@ All readings are synthetic. No physical water hardware, real utility system, MQT
 
 `npm.cmd test` runs the pure engine and mocked Gemini transport tests. Mocked API tests do not verify a real Gemini account. Browser tests use Playwright with locally installed Chrome (see `playwright.config.mjs`):
 
-The usability update was verified with 15 automated calculation/API tests, 9 Playwright browser tests, ESLint and a production build. Browser coverage includes all four scenarios, shared readings after valve changes, mocked assistant success and follow-ups, snapshot reset, missing-key and connection failures, guided learning, keyboard-operated definitions, and navigation/overflow at 1280×450, 768×600, 390×844 and 320×568. No real Gemini request was verified.
+The 24 November release check passed 46 unit and integration tests, 44 Playwright browser tests, ESLint and a production build. Coverage includes both Wokwi startup modes, authenticated telemetry, all four internal scenarios, frozen assistant snapshots, provider failures and the rules-based fallback. The team’s live Gemini checks are recorded under **Verified Gemini demonstrations**.
 
 ```powershell
 npm.cmd run test:e2e
@@ -115,11 +137,11 @@ That command starts a production server on port 3100; run `npm.cmd run build` fi
 Use a Next.js Node runtime for the HTTP routes. Internal simulation, the demo login, alerts, exports, network selection, allocation previews and the rules-based explanation work without environment variables or a running ESP32 simulator.
 
 1. Run `git status --short --untracked-files=all`. Stage the reviewed source, lockfile, assets, tests and documentation, then inspect `git diff --cached --name-only` before committing. Keep local environment files, configured firmware, device credentials, tools, browser traces and logs off GitHub.
-2. For the public hackathon demo, import the reviewed commit into Vercel using the Next.js preset, or use a Node host with `npm ci`, `npm run build` and `npm start`. Start with Gemini and telemetry credentials unset. A reverse proxy that gives Next.js an internal URL should preserve the public Host header and set `FLOWRA_PUBLIC_ORIGIN` to the exact external origin, including HTTPS and any nondefault port.
-3. Open the returned URL in a fresh incognito window and run the walkthrough above on desktop and mobile.
-4. Record the walkthrough (normal → B leak → evidence → shortage → fair allocation → explanation) and submit the deployed URL, repository and recording through the hackathon portal before November 22, 2026, 11:59 PM IST.
+2. Open the [public Flowra demo](https://flowra-mu.vercel.app/) in a fresh browser window and run the internal simulation walkthrough. The existing Vercel project already has its Gemini configuration.
+3. To demonstrate firmware telemetry, record the Wokwi terminal and the local receiver together. Show an accepted frame and its matching evidence in Ask Flowra.
+4. Submit the public website, GitHub repository and recording through the IDEA//FORGE portal. The extended deadline is **24 November 2026 at 5:00 PM IST**.
 
-GitHub upload, public deployment, public incognito verification, a recorded demo and final hackathon submission require the owner's accounts, repository destination and submission portal; these are not automatically completed by the source implementation. No public URL or hardware connection is claimed.
+For self-hosted copies that use a reverse proxy, preserve the public Host header. If Next.js receives an internal URL, set `FLOWRA_PUBLIC_ORIGIN` to the exact external origin, including HTTPS and any nondefault port.
 
 **Optional services.** `GEMINI_API_KEY` and `FLOWRA_INGEST_TOKEN` are separate server secrets. `GEMINI_MODEL`, `GEMINI_TIMEOUT_MS` and `FLOWRA_DEVICE_ID` are optional configuration. Use server environment variables without a `NEXT_PUBLIC_` prefix. The public operator account only gates the interface in the browser. Before enabling public Gemini generation, set provider quota controls and enforce access or a request budget across instances. The local limiter allows ten valid explanation requests per minute per process.
 
@@ -129,11 +151,11 @@ GitHub upload, public deployment, public incognito verification, a recorded demo
 
 This is a prototype, not a hydraulic engineering or utility control system. Pressure, elevation, pipe friction, sensor uncertainty and transit delays are not modeled. A leak alert can also represent meter faults or unmetered use in a real system. Forecasts have no calibrated confidence interval and assume unchanged conditions. State is memory-only per browser tab, with a bounded 90-sample chart and 100-event timeline; use export to retain a snapshot. The local Wokwi ESP32 delivered normal readings to Flowra. See [the recorded receiver timestamps](hardware/wokwi-esp32/README.md). Real Gemini service behavior cannot be verified without a configured key; unit tests exercise the documented transport through mocks.
 
-## Verified pinned-model follow-up
+## Verified Gemini demonstrations
 
-A single bounded generateContent test against `gemini-3.5-flash-lite` returned HTTP 200, nonempty real text and STOP in approximately 1.6 seconds (15-second deadline; 64 output tokens; tiny synthetic tank prompt). Official metadata lists this exact model with generateContent support for the configured key; official pricing lists free-tier text input/output. Metadata does not expose project-specific remaining quota. `.env.local` now pins this verified model through GEMINI_MODEL without changing the key, billing or timeout. The application omits an explicit sampling override for this pinned model to match the verified request profile.
+The team verified Gemini 3.5 Flash-Lite on the public Vercel site using the internal simulation. In a separate local run with `serve --with-gemini`, the ESP32 firmware running in Wokwi supplied the readings. Gemini reported the tank volume from the frozen device snapshot and explained the observed **12 L/min Zone B inlet/outlet imbalance**. The rule labels this a suspected leak. Automated tests use a mocked provider so they can run without a Gemini account.
 
-Exactly one alternative generation request was made, with no retries. A second live full Ask Flowra request was not made because of the one-request cap. Restart Next.js and send one short Ask Flowra question to verify the complete app path. Its grounded request and response parsing are covered by mocked tests; that is separate from the real tiny-prompt success. The latest alias metadata identifies itself as Gemini Flash Latest but supplies no concrete version, so its exact current backend was not established from metadata.
+An earlier diagnostic with a tiny synthetic prompt returned HTTP 200 and nonempty text in about 1.6 seconds on this model. That timing applies to the diagnostic prompt.
 
 ## Complete demo: sign-in, sources and device input
 
@@ -151,7 +173,7 @@ Example local walkthrough (after starting Next.js and selecting Connected device
 node scripts/send-telemetry.mjs --scenario=leak --count=6
 ```
 
-The sender privately loads the separate device token from `.env.local`, uses real HTTP and prints only acceptance status. It is a Node test sender, not proof of a Wokwi run. This workspace has a locally generated ingestion token if none existed; its value was never printed or committed. For a fresh checkout, configure FLOWRA_INGEST_TOKEN (at least 32 random characters) and FLOWRA_DEVICE_ID, then restart Next.js. See .env.example. Never put device tokens in browser code, public Wokwi source or Git.
+For this Node sender on the ordinary local Next.js server, set `FLOWRA_INGEST_TOKEN` (at least 32 random characters) and `FLOWRA_DEVICE_ID` in `.env.local`, then restart Next.js. The sender loads the token privately and prints acceptance status. For Wokwi on port 3002, the `prepare` command generates the matching device credential for the receiver and firmware.
 
 Run `npm.cmd test`, `npm.cmd run lint`, `npm.cmd run build`, then `npm.cmd run test:e2e`. Browser tests use public demo credentials and a test-only device token, and disable Gemini credentials so no Google requests occur. Coverage includes original scenarios and panels, login/profile/sign-out, validated HTTP ingestion, source switching, safe Markdown, frozen context, and disconnected/stale states.
 
@@ -256,7 +278,7 @@ All five technical information sections now use accessible animated accordions, 
 
 **ESP32 firmware compiled successfully** with the actual Xtensa compiler / Arduino-ESP32 framework, including both safe placeholder and private disposable-header paths. An old PlatformIO source filter excluded the converted sketch.ino.cpp; this was fixed and the Espressif32 platform pinned to 6.12.0. The firmware adds bounded WiFi recovery, safe HTTP diagnostics, response-aware backoff, stop/resume serial controls and storage-limited synthetic delivery. The endpoint schema, authentication, replay checks and rate limits were not weakened.
 
-The optional `scripts/wokwi-demo.mjs` prepares a private disposable device credential and starts a loopback-only port-3002 production server, with Gemini disabled only in that test process. It never edits .env.local or prints the credential. Existing private configuration is not overwritten. Stop its server before cleanup and rebuild whenever credentials change. A three-frame Node test on this receiver returned 202, produced the correct B suspicion, then became Stale/Disconnected without new readings. This is still **not a Wokwi transmission**.
+The optional `scripts/wokwi-demo.mjs` prepares a private disposable device credential and starts a loopback-only port-3002 production server. Plain `serve` disables Gemini. Use `serve --with-gemini` to enable server-configured AI. It never edits .env.local or prints the credential. Existing private configuration is not overwritten. Stop its server before cleanup and rebuild whenever credentials change. A three-frame Node test on this receiver returned 202, produced the correct B suspicion, then became Stale/Disconnected without new readings.
 
 On 21 November 2026 the ESP32 running in Wokwi for VS Code delivered accepted frames through the bundled private gateway. The firmware now synchronizes its clock from the local receiver before generating each sample.
 

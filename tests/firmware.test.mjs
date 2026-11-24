@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { validateTelemetry, frameToState, telemetryStatus, STALE_MS, DISCONNECTED_MS } from '../lib/telemetry.mjs';
 import { prepare, cleanup } from '../scripts/wokwi-demo.mjs';
-import { mkdir, mkdtemp, readFile, writeFile, unlink, rmdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { copyFile, mkdir, mkdtemp, readFile, writeFile, unlink, rmdir, rm } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 // Reconstruct the checked-in C++ printf wire-format with bounded public fixtures.
 // This validates the actual format contract; it is NOT execution in Wokwi.
@@ -55,4 +57,50 @@ test('disposable local Wokwi setup never overwrites credentials or changes the a
     await unlink(join(root, '.env.local'));
     for (const folder of ['hardware/wokwi-esp32', 'hardware', '.tools', '']) await rmdir(join(root, folder));
   }
+});
+
+test('the Wokwi serve CLI requires explicit Gemini opt-in and keeps the authenticated loopback receiver settings', async t => {
+  const toolsDir = join(process.cwd(), '.tools');
+  await mkdir(toolsDir, { recursive: true });
+  const root = await mkdtemp(join(toolsDir, 'wokwi-serve-test-'));
+  t.after(async () => {
+    assert.equal(dirname(root), toolsDir);
+    await rm(root, { recursive: true, force: true });
+  });
+  await mkdir(join(root, 'scripts'));
+  await mkdir(join(root, '.tools'));
+  const launcher = join(root, 'scripts', 'wokwi-demo.mjs');
+  await copyFile(new URL('../scripts/wokwi-demo.mjs', import.meta.url), launcher);
+  const config = { deviceId: 'esp32-flowra-01', port: 3002, token: 'ab'.repeat(32) };
+  await writeFile(join(root, '.tools', 'wokwi-demo.json'), JSON.stringify(config));
+  await writeFile(join(root, '.env.local'), 'GEMINI_API_KEY=file-fixture\n');
+
+  // Run the real launcher and Next.js env loader, with a probe in place of the HTTP server.
+  await writeFile(join(root, 'package.json'), JSON.stringify({ private: true, scripts: { start: 'node probe.cjs' } }));
+  await writeFile(join(root, 'probe.cjs'), `
+    const assert = require('node:assert/strict');
+    require('@next/env').loadEnvConfig(process.cwd());
+    const config = require('./.tools/wokwi-demo.json');
+    assert.deepEqual(process.argv.slice(2), ['--hostname', '127.0.0.1', '--port', '3002']);
+    assert.ok(process.env.GEMINI_API_KEY === process.env.EXPECTED_TEST_KEY);
+    assert.ok(process.env.FLOWRA_INGEST_TOKEN === config.token);
+    assert.equal(process.env.FLOWRA_DEVICE_ID, config.deviceId);
+    assert.equal(process.env.FLOWRA_PUBLIC_ORIGIN, '');
+    console.log('Receiver settings verified.');
+  `);
+  const run = promisify(execFile);
+  for (const [options, inheritedKey, expectedKey] of [
+    [[], 'shell-fixture', ''],
+    [['--with-gemini'], '', 'file-fixture'],
+    [['--with-gemini'], 'shell-fixture', 'shell-fixture']
+  ]) {
+    const env = { ...process.env, NODE_ENV: 'production', GEMINI_API_KEY: inheritedKey, EXPECTED_TEST_KEY: expectedKey,
+      FLOWRA_INGEST_TOKEN: 'other-fixture', FLOWRA_DEVICE_ID: 'other-device', FLOWRA_PUBLIC_ORIGIN: 'https://example.invalid' };
+    delete env.__NEXT_PROCESSED_ENV;
+    const { stdout } = await run(process.execPath, [launcher, 'serve', ...options], { cwd: root, env });
+    assert.match(stdout, /Receiver settings verified/);
+    assert.ok(stdout.includes(options.length ? 'Gemini allowed' : 'Gemini disabled'));
+    for (const privateValue of [config.token, 'shell-fixture', 'file-fixture']) assert.ok(!stdout.includes(privateValue));
+  }
+  await assert.rejects(run(process.execPath, [launcher, 'serve', '--with-gemini', 'typo'], { cwd: root }), { code: 1 });
 });
